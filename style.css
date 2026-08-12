@@ -1493,3 +1493,15 @@ html[data-theme="dark"] .strike {
     letter-spacing: -0.02em;
   }
 }
+
+
+/* ---------------- 모바일 빠른 두 번 탭 확대 방지 ----------------
+   완료 체크 및 행 조작 버튼은 더블탭 확대 대신 즉시 탭으로 처리 */
+@media (max-width: 639px) {
+  .seal-box,
+  .row-actions button,
+  .icon-btn,
+  button {
+    touch-action: manipulation;
+  }
+}
