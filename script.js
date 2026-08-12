@@ -509,6 +509,11 @@
   function buildRow(row, ordinal, readOnly) {
     var li = document.createElement("li");
     li.className = "row" + (row.done ? " done" : "");
+
+    // 모바일에서 긴 문장은 길이에 따라 글씨를 자동으로 줄인다.
+    var textLength = String(row.text || "").replace(/\s/g, "").length;
+    if (textLength >= 65) li.classList.add("text-xlong");
+    else if (textLength >= 38) li.classList.add("text-long");
     li.setAttribute("data-row-id", row.id);
     li.style.animationDelay = Math.min(ordinal, 12) * 32 + "ms";
     if (flashId === row.id) li.classList.add("flash");

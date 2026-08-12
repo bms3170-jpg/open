@@ -1478,3 +1478,18 @@ html[data-theme="dark"] .strike {
 @media (min-width:700px) {
   .manual-notice { padding: 18px 28px 19px; }
 }
+
+
+/* ---------------- 모바일 긴 문장 자동 글씨 크기 ---------------- */
+@media (max-width: 639px) {
+  .row.text-long .row-text {
+    font-size: 0.88rem;
+    line-height: 1.45;
+    letter-spacing: -0.015em;
+  }
+  .row.text-xlong .row-text {
+    font-size: 0.78rem;
+    line-height: 1.5;
+    letter-spacing: -0.02em;
+  }
+}
