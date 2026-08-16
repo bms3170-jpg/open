@@ -1,32 +1,16 @@
-/* ============================================================
-   DAILY LEDGER — script.js
-   프레임워크 없는 순수 JavaScript. 로그인 불필요, localStorage 저장.
-
-   [데이터 모델]  키: "daily-ledger:v1"
-   {
-     version: 1,
-     items:    [{ id, text, seed, createdAt }],   // 항목 원본 (영구 보존)
-     history:  { "YYYY-MM-DD": [완료된 id, ...] }, // 날짜별 완료 표시
-     snapshots:{ "YYYY-MM-DD": { id: "그날의 문구" } }, // 지난 장 복원용
-     lastSeenDate: "YYYY-MM-DD"
-   }
-
-   핵심 설계: 항목(items)과 완료 표시(history)를 분리한다.
-   → 날짜가 바뀌면 '그 날짜의 빈 완료 목록'을 새로 읽을 뿐이므로
-     항목이 삭제되는 코드 경로가 아예 존재하지 않는다.
-     (항목 소실·개수 감소 문제의 구조적 해결)
-   ============================================================ */
-
 (function () {
   "use strict";
 
-  /* ---------------- 상수 ---------------- */
-  var STORAGE_KEY = "daily-ledger:v1";
+  var STORAGE_KEY = "daily-ledger:v2";
+  var LEGACY_STORAGE_KEY = "daily-ledger:v1";
   var THEME_KEY = "daily-ledger:theme";
-  var MANUAL_NOTICE_KEY = "daily-ledger:manual-notices";
-  var DATA_VERSION = 2;
+  var MANUAL_NOTICE_KEY = "daily-ledger:manual-notices:v2";
+  var LEGACY_MANUAL_NOTICE_KEY = "daily-ledger:manual-notices";
+  var MEMO_KEY = "daily-ledger:memos:v1";
+  var NOTICE_CHECK_KEY = "daily-ledger:notice-checks:v1";
+  var PIN_KEY = "daily-ledger:pins:v1";
+  var DATA_VERSION = 3;
 
-  /** 코딩으로 만든 기본 항목 — 전체 초기화 후에도 반드시 남는 항목 */
   var SEED_ITEMS = [
     { id: "open-1", text: "매장 에어컨, 불 ON" },
     { id: "open-2", text: "마스트레나는 꼭 깨워주기 (시간 걸림)" },
@@ -44,12 +28,10 @@
     { id: "open-14", text: "게시판 확인, 데일리 업데이트 확인" },
     { id: "open-15", text: "10~11시 콜드브루 준비 또는 소분(원두 미리 분쇄하기)" },
     { id: "open-16", text: "콜드브루 추출" },
-    { id: "open-17", text: "정산 및 데일리 작성" },
+    { id: "open-17", text: "정산 및 데일리 작성" }
   ];
 
   var WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
-
-  /* 요일별 정기 업무 — 실제 오늘 날짜의 요일을 자동 인식해 맨 위 공지에 표시 */
   var WEEKLY_NOTICES = {
     0: ["물류 입고", "발주 체크", "파우더 폐기"],
     1: ["물류 발주", "제빙기 청소 (스케줄 코드 확인)", "쇼케이스 필터 청소"],
@@ -57,192 +39,125 @@
     3: ["물류 입고", "물류 발주"],
     4: ["발주 체크"],
     5: ["냉동 발주 (바로 다음날 입고됨)", "물류 입고", "물류 발주"],
-    6: [],
+    6: []
   };
 
-  /* ---------------- 상태 ---------------- */
-  var data = null; // LedgerData
-  var today = ""; // "YYYY-MM-DD"
-  var viewDate = ""; // 현재 보고 있는 날짜
+  var data = null;
+  var today = "";
+  var viewDate = "";
+  var editingId = null;
   var dragId = null;
   var overId = null;
-  var editingId = null;
-  var flashId = null;
-  var flashTimer = null;
+  var doneCollapsed = true;
+  var focusMode = false;
+  var searchQuery = "";
 
-  /* ---------------- DOM 참조 ---------------- */
-  var $ = function (id) {
-    return document.getElementById(id);
-  };
+  function $(id) { return document.getElementById(id); }
 
   var el = {
-    serial: $("serial"),
-    themeToggle: $("themeToggle"),
-    prevDay: $("prevDay"),
-    nextDay: $("nextDay"),
-    todayBtn: $("todayBtn"),
-    dateMeta: $("dateMeta"),
-    dateHead: $("dateHead"),
-    readonlyNote: $("readonlyNote"),
-    pctNum: $("pctNum"),
-    track: $("track"),
-    fill: $("fill"),
-    tally: $("tally"),
-    doneFlag: $("doneFlag"),
-    pastEmpty: $("pastEmpty"),
-    pastList: $("pastList"),
-    clearChecks: $("clearChecks"),
-    resetAll: $("resetAll"),
-    captionKicker: $("captionKicker"),
-    captionHead: $("captionHead"),
-    captionDate: $("captionDate"),
-    composeRow: $("composeRow"),
-    newItem: $("newItem"),
-    addBtn: $("addBtn"),
-    pendingList: $("pendingList"),
-    doneList: $("doneList"),
-    emptyState: $("emptyState"),
-    settledBar: $("settledBar"),
-    settledCount: $("settledCount"),
-    footTally: $("footTally"),
-    overlay: $("overlay"),
-    dlgCancel: $("dlgCancel"),
-    dlgConfirm: $("dlgConfirm"),
-    seedCount: $("seedCount"),
-    toastWrap: $("toastWrap"),
-    dailyNotice: $("dailyNotice"),
-    dailyNoticeDay: $("dailyNoticeDay"),
-    dailyNoticeList: $("dailyNoticeList"),
-    manualNotice: $("manualNotice"),
-    manualNoticeCount: $("manualNoticeCount"),
-    manualNoticeInput: $("manualNoticeInput"),
-    manualNoticeAdd: $("manualNoticeAdd"),
-    manualNoticeList: $("manualNoticeList"),
-    manualNoticeEmpty: $("manualNoticeEmpty"),
+    serial: $("serial"), themeToggle: $("themeToggle"), focusToggle: $("focusToggle"),
+    prevDay: $("prevDay"), nextDay: $("nextDay"), todayBtn: $("todayBtn"),
+    dateMeta: $("dateMeta"), dateHead: $("dateHead"), readonlyNote: $("readonlyNote"),
+    pctNum: $("pctNum"), progressRing: $("progressRing"), track: $("track"), fill: $("fill"),
+    statTotal: $("statTotal"), statDone: $("statDone"), statRemain: $("statRemain"), doneFlag: $("doneFlag"),
+    weekAverage: $("weekAverage"), pastEmpty: $("pastEmpty"), pastList: $("pastList"),
+    clearChecks: $("clearChecks"), resetAll: $("resetAll"),
+    captionKicker: $("captionKicker"), captionHead: $("captionHead"),
+    composeRow: $("composeRow"), newItem: $("newItem"), addBtn: $("addBtn"),
+    pendingCount: $("pendingCount"), pendingList: $("pendingList"), doneList: $("doneList"),
+    emptyState: $("emptyState"), settledBar: $("settledBar"), settledCount: $("settledCount"),
+    doneToggleButton: $("doneToggleButton"), toggleDone: $("toggleDone"),
+    searchToggle: $("searchToggle"), searchWrap: $("searchWrap"), searchInput: $("searchInput"), searchClear: $("searchClear"),
+    footTally: $("footTally"), overlay: $("overlay"), dlgCancel: $("dlgCancel"), dlgConfirm: $("dlgConfirm"),
+    seedCount: $("seedCount"), toastWrap: $("toastWrap"),
+    dailyNotice: $("dailyNotice"), dailyNoticeDay: $("dailyNoticeDay"), dailyNoticeList: $("dailyNoticeList"),
+    dailyNoticeSummary: $("dailyNoticeSummary"), dailyNoticeReset: $("dailyNoticeReset"),
+    manualNoticeCount: $("manualNoticeCount"), manualNoticeInput: $("manualNoticeInput"),
+    manualNoticeAdd: $("manualNoticeAdd"), manualNoticeList: $("manualNoticeList"), manualNoticeEmpty: $("manualNoticeEmpty"),
+    todayMemo: $("todayMemo"), memoSaveState: $("memoSaveState"), memoCount: $("memoCount"), memoClear: $("memoClear"),
+    quickAddFab: $("quickAddFab")
   };
 
-  /* ============================================================
-     1. 날짜 유틸 (모두 로컬 시간 기준)
-     ============================================================ */
   function toDateKey(d) {
-    var y = d.getFullYear();
-    var m = String(d.getMonth() + 1).padStart(2, "0");
-    var day = String(d.getDate()).padStart(2, "0");
-    return y + "-" + m + "-" + day;
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
-
-  function todayKey() {
-    return toDateKey(new Date());
-  }
-
+  function todayKey() { return toDateKey(new Date()); }
   function parseKey(key) {
     var p = key.split("-");
     return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
   }
-
   function shiftKey(key, delta) {
     var d = parseKey(key);
     d.setDate(d.getDate() + delta);
     return toDateKey(d);
   }
-
   function formatLongKo(key) {
     var d = parseKey(key);
-    return {
-      md: d.getMonth() + 1 + "월 " + d.getDate() + "일",
-      wd: WEEKDAY_KO[d.getDay()] + "요일",
-    };
+    return { md: (d.getMonth() + 1) + "월 " + d.getDate() + "일", wd: WEEKDAY_KO[d.getDay()] + "요일" };
   }
-
   function formatShortKo(key) {
     var d = parseKey(key);
-    return d.getMonth() + 1 + "." + d.getDate();
+    return (d.getMonth() + 1) + "." + d.getDate();
+  }
+  function newId(prefix) {
+    return (prefix || "it") + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
   }
 
-  function relativeLabel(key) {
-    if (key === today) return "오늘";
-    if (key === shiftKey(today, -1)) return "어제";
-    return null;
-  }
-
-  function newId() {
-    return "it-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-  }
-
-  /* ============================================================
-     2. 저장 / 불러오기 (방어적으로)
-     ============================================================ */
   function createInitialData() {
     var now = Date.now();
     return {
       version: DATA_VERSION,
       items: SEED_ITEMS.map(function (s, i) {
-        return { id: s.id, text: s.text, seed: true, createdAt: now + i };
+        return { id: s.id, text: s.text, seed: true, pinned: false, createdAt: now + i };
       }),
       history: {},
       snapshots: {},
-      lastSeenDate: todayKey(),
+      lastSeenDate: todayKey()
     };
   }
 
-  /**
-   * 저장된 값이 어떤 형태로 깨져 있어도 항목을 버리지 않고 최대한 살린다.
-   * 중복 id 제거까지 수행 — 중복 id는 렌더링 꼬임의 원인이 된다.
-   */
   function normalize(raw) {
     var base = createInitialData();
     if (!raw || typeof raw !== "object") return base;
-
-    var incomingVersion = Number(raw.version) || 1;
     var items = [];
+    var seen = {};
     if (Array.isArray(raw.items)) {
-      var seen = {};
       raw.items.forEach(function (it) {
-        if (!it || typeof it !== "object") return;
-        if (typeof it.id !== "string" || typeof it.text !== "string") return;
-        if (seen[it.id]) return;
+        if (!it || typeof it.id !== "string" || typeof it.text !== "string" || seen[it.id]) return;
         seen[it.id] = true;
         items.push({
           id: it.id,
           text: it.text,
           seed: it.seed === true,
-          createdAt: typeof it.createdAt === "number" ? it.createdAt : Date.now(),
+          pinned: it.pinned === true,
+          createdAt: typeof it.createdAt === "number" ? it.createdAt : Date.now()
         });
       });
     }
-    if (!items.length && !Array.isArray(raw.items)) items = base.items;
-
-    // v1 → v2: 예전 기본 목록은 새 오픈 To-do로 교체하고 직접 추가한 항목은 보존한다.
-    if (incomingVersion < 2) {
-      var customItems = items.filter(function (it) {
-        return it.seed !== true;
-      });
-      items = base.items.concat(customItems);
-    }
+    if (!items.length) items = base.items;
 
     var history = {};
     if (raw.history && typeof raw.history === "object") {
       Object.keys(raw.history).forEach(function (k) {
-        var v = raw.history[k];
-        if (!Array.isArray(v)) return;
-        var uniq = [];
-        v.forEach(function (x) {
-          if (typeof x === "string" && uniq.indexOf(x) === -1) uniq.push(x);
-        });
-        history[k] = uniq;
+        history[k] = Array.isArray(raw.history[k]) ? raw.history[k].filter(function (x, i, a) {
+          return typeof x === "string" && a.indexOf(x) === i;
+        }) : [];
       });
     }
 
     var snapshots = {};
     if (raw.snapshots && typeof raw.snapshots === "object") {
       Object.keys(raw.snapshots).forEach(function (k) {
-        var v = raw.snapshots[k];
-        if (!v || typeof v !== "object" || Array.isArray(v)) return;
-        var inner = {};
-        Object.keys(v).forEach(function (id) {
-          if (typeof v[id] === "string") inner[id] = v[id];
+        if (!raw.snapshots[k] || typeof raw.snapshots[k] !== "object") return;
+        snapshots[k] = {};
+        Object.keys(raw.snapshots[k]).forEach(function (id) {
+          if (typeof raw.snapshots[k][id] === "string") snapshots[k][id] = raw.snapshots[k][id];
         });
-        snapshots[k] = inner;
       });
     }
 
@@ -251,449 +166,300 @@
       items: items,
       history: history,
       snapshots: snapshots,
-      lastSeenDate: typeof raw.lastSeenDate === "string" ? raw.lastSeenDate : todayKey(),
+      lastSeenDate: typeof raw.lastSeenDate === "string" ? raw.lastSeenDate : todayKey()
     };
   }
 
   function loadData() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return createInitialData();
-      return normalize(JSON.parse(raw));
-    } catch (e) {
-      // 파싱 실패 시에도 원본을 지우지 않고 백업으로 남긴다.
-      try {
-        var broken = localStorage.getItem(STORAGE_KEY);
-        if (broken) localStorage.setItem(STORAGE_KEY + ":backup:" + Date.now(), broken);
-      } catch (e2) {
-        /* 무시 */
+      if (raw) return normalize(JSON.parse(raw));
+      var legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (legacy) {
+        var migrated = normalize(JSON.parse(legacy));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+        return migrated;
       }
-      return createInitialData();
-    }
+    } catch (e) {}
+    return createInitialData();
   }
-
   function saveData() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {
-      /* 용량 초과 / 시크릿 모드 — 화면은 계속 사용 가능하게 둔다 */
-    }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
   }
-
-  /** 오늘 문구를 스냅샷에 기록해 두면, 나중에 수정/삭제해도 지난 장이 그대로 남는다. */
   function snapshot(dateKey) {
     if (!data.snapshots[dateKey]) data.snapshots[dateKey] = {};
-    var snap = data.snapshots[dateKey];
-    data.items.forEach(function (it) {
-      snap[it.id] = it.text;
-    });
+    data.items.forEach(function (it) { data.snapshots[dateKey][it.id] = it.text; });
   }
 
-  /* ============================================================
-     3. 파생 데이터
-     ============================================================ */
-  function completedList(dateKey) {
-    return data.history[dateKey] || [];
+  function loadJson(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) { return fallback; }
+  }
+  function saveJson(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
   }
 
-  /** 특정 날짜에 표시할 줄 목록. 스냅샷 문구가 우선. */
+  function completedList(dateKey) { return data.history[dateKey] || []; }
   function rowsForDate(dateKey) {
     var done = completedList(dateKey);
     var snap = data.snapshots[dateKey] || {};
-    var liveIds = {};
+    var live = {};
     var rows = data.items.map(function (it) {
-      liveIds[it.id] = true;
+      live[it.id] = true;
       return {
         id: it.id,
-        text: snap[it.id] !== undefined && dateKey !== today ? snap[it.id] : it.text,
+        text: (dateKey !== today && snap[it.id] !== undefined) ? snap[it.id] : it.text,
         done: done.indexOf(it.id) !== -1,
         removed: false,
+        pinned: it.pinned === true
       };
     });
-    // 그날엔 있었지만 이후 삭제된 항목도 지난 장에는 남겨 보여준다.
     Object.keys(snap).forEach(function (id) {
-      if (!liveIds[id]) {
-        rows.push({ id: id, text: snap[id], done: done.indexOf(id) !== -1, removed: true });
-      }
+      if (!live[id]) rows.push({ id: id, text: snap[id], done: done.indexOf(id) !== -1, removed: true, pinned: false });
     });
     return rows;
   }
-
-  function percentOf(total, done) {
-    return total <= 0 ? 0 : Math.round((done / total) * 100);
-  }
-
-  /** 오늘 이전으로 기록이 있는 날짜들, 최신순 */
+  function percentOf(total, done) { return total ? Math.round((done / total) * 100) : 0; }
+  function indexOfItem(id) { return data.items.findIndex(function (it) { return it.id === id; }); }
   function pastKeys() {
     var set = {};
-    Object.keys(data.history).forEach(function (k) {
-      set[k] = true;
-    });
-    Object.keys(data.snapshots).forEach(function (k) {
-      set[k] = true;
-    });
-    return Object.keys(set)
-      .filter(function (k) {
-        return k < today;
-      })
-      .sort()
-      .reverse();
+    Object.keys(data.history).forEach(function (k) { set[k] = true; });
+    Object.keys(data.snapshots).forEach(function (k) { set[k] = true; });
+    return Object.keys(set).filter(function (k) { return k < today; }).sort().reverse();
   }
 
-  function indexOfItem(id) {
-    for (var i = 0; i < data.items.length; i++) {
-      if (data.items[i].id === id) return i;
-    }
-    return -1;
-  }
-
-  /* ============================================================
-     4. 동작(액션)
-     ============================================================ */
   function addItem(text) {
     var clean = String(text || "").trim();
-    if (!clean) return null;
-    if (viewDate !== today) viewDate = today; // 지난 장을 보고 있었다면 오늘로 복귀
-    var item = { id: newId(), text: clean, seed: false, createdAt: Date.now() };
-    data.items.push(item);
-    snapshot(today);
-    saveData();
-    setFlash(item.id);
-    render();
-    return item.id;
+    if (!clean) return;
+    if (viewDate !== today) viewDate = today;
+    data.items.push({ id: newId("it"), text: clean, seed: false, pinned: false, createdAt: Date.now() });
+    snapshot(today); saveData(); render();
   }
-
   function editItem(id, text) {
     var clean = String(text || "").trim();
     if (!clean) return;
     var i = indexOfItem(id);
     if (i < 0) return;
-    data.items[i].text = clean;
-    snapshot(today);
-    saveData();
+    data.items[i].text = clean; snapshot(today); saveData();
   }
-
   function removeItem(id) {
     var i = indexOfItem(id);
     if (i < 0) return;
     var backup = data.items[i];
-    data.items.splice(i, 1);
-    saveData();
-    render();
-
-    // 되돌리기 제공 — 실수로 지운 항목을 잃지 않게
-    toast("항목을 지웠습니다.", backup.text, "되돌리기", function () {
+    data.items.splice(i, 1); saveData(); render();
+    toast("업무를 삭제했습니다.", backup.text, "되돌리기", function () {
       if (indexOfItem(backup.id) !== -1) return;
-      data.items.splice(Math.min(i, data.items.length), 0, backup);
-      saveData();
-      render();
+      data.items.splice(Math.min(i, data.items.length), 0, backup); saveData(); render();
     });
   }
-
   function toggleItem(id, dateKey) {
-    var list = data.history[dateKey] ? data.history[dateKey].slice() : [];
+    var list = (data.history[dateKey] || []).slice();
     var at = list.indexOf(id);
-    if (at === -1) list.push(id);
-    else list.splice(at, 1);
-    data.history[dateKey] = list;
-    snapshot(dateKey);
-    saveData();
-    render();
+    if (at === -1) list.push(id); else list.splice(at, 1);
+    data.history[dateKey] = list; snapshot(dateKey); saveData(); render();
   }
-
-  /**
-   * 순서 이동 + 화면 동시 스크롤.
-   * 이동 전 화면상 위치를 기억한 뒤, 이동 후 위치와의 차이만큼
-   * window 를 스크롤해 항목이 시선 아래에 그대로 머무르게 한다.
-   */
+  function togglePin(id) {
+    var i = indexOfItem(id);
+    if (i < 0) return;
+    data.items[i].pinned = !data.items[i].pinned;
+    saveData(); render();
+  }
   function moveItem(id, delta) {
     var from = indexOfItem(id);
     if (from < 0) return;
-    var to = Math.min(Math.max(from + delta, 0), data.items.length - 1);
+    var to = Math.max(0, Math.min(data.items.length - 1, from + delta));
     if (to === from) return;
-
-    var nodeBefore = document.querySelector('[data-row-id="' + id + '"]');
-    var topBefore = nodeBefore ? nodeBefore.getBoundingClientRect().top : null;
-
     var moved = data.items.splice(from, 1)[0];
-    data.items.splice(to, 0, moved);
-    saveData();
-    setFlash(id);
-    render();
-
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        var nodeAfter = document.querySelector('[data-row-id="' + id + '"]');
-        if (!nodeAfter) return;
-        var topAfter = nodeAfter.getBoundingClientRect().top;
-        if (topBefore !== null) {
-          var shift = topAfter - topBefore;
-          if (Math.abs(shift) > 1) window.scrollBy({ top: shift, behavior: "smooth" });
-        }
-        // 화면 밖으로 나갔다면 중앙으로 끌어온다
-        var box = nodeAfter.getBoundingClientRect();
-        if (box.top < 80 || box.bottom > window.innerHeight - 40) {
-          nodeAfter.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-      });
-    });
+    data.items.splice(to, 0, moved); saveData(); render();
   }
-
-  /** 드래그로 순서 교체 */
   function reorder(fromId, toId) {
-    var from = indexOfItem(fromId);
-    var to = indexOfItem(toId);
+    var from = indexOfItem(fromId), to = indexOfItem(toId);
     if (from < 0 || to < 0 || from === to) return;
     var moved = data.items.splice(from, 1)[0];
-    data.items.splice(to, 0, moved);
-    saveData();
-    render();
+    data.items.splice(to, 0, moved); saveData(); render();
   }
 
-  /** 오늘의 완료 표시만 지운다. 항목은 손대지 않는다. */
-  function clearTodayChecks() {
-    data.history[today] = [];
-    saveData();
-    render();
-    toast("오늘의 완료 표시를 모두 지웠습니다.", "항목은 그대로 남아 있습니다.");
+  function loadManualNotices() {
+    var items = loadJson(MANUAL_NOTICE_KEY, null);
+    if (!Array.isArray(items)) {
+      var legacy = loadJson(LEGACY_MANUAL_NOTICE_KEY, []);
+      if (Array.isArray(legacy)) {
+        items = legacy.map(function (x) {
+          return { id: x.id || newId("quick"), text: x.text || "", done: false, createdAt: Date.now() };
+        });
+        saveJson(MANUAL_NOTICE_KEY, items);
+      } else items = [];
+    }
+    return items.filter(function (x) { return x && typeof x.id === "string" && typeof x.text === "string"; });
+  }
+  function saveManualNotices(items) { saveJson(MANUAL_NOTICE_KEY, items); }
+  function addManualNotice() {
+    var text = el.manualNoticeInput.value.trim();
+    if (!text) { el.manualNoticeInput.focus(); return; }
+    var items = loadManualNotices();
+    items.push({ id: newId("quick"), text: text, done: false, createdAt: Date.now() });
+    saveManualNotices(items); el.manualNoticeInput.value = ""; renderManualNotices(); el.manualNoticeInput.focus();
+  }
+  function toggleManualNotice(id) {
+    var items = loadManualNotices();
+    items.forEach(function (x) { if (x.id === id) x.done = !x.done; });
+    saveManualNotices(items); renderManualNotices();
+  }
+  function deleteManualNotice(id) {
+    var items = loadManualNotices().filter(function (x) { return x.id !== id; });
+    saveManualNotices(items); renderManualNotices();
+  }
+  function renderManualNotices() {
+    var items = loadManualNotices();
+    var done = items.filter(function (x) { return x.done; }).length;
+    el.manualNoticeCount.textContent = items.length ? (done + "/" + items.length) : "0건";
+    el.manualNoticeEmpty.hidden = items.length > 0;
+    el.manualNoticeList.innerHTML = items.map(function (item) {
+      return '<li class="' + (item.done ? 'done' : '') + '" data-manual-id="' + escapeHtml(item.id) + '">' +
+        '<button type="button" class="quick-check" data-manual-toggle="' + escapeHtml(item.id) + '" aria-label="완료 표시">' + (item.done ? "✓" : "") + '</button>' +
+        '<span class="quick-text">' + escapeHtml(item.text) + '</span>' +
+        '<button type="button" class="quick-delete" data-manual-delete="' + escapeHtml(item.id) + '">삭제</button>' +
+        '</li>';
+    }).join("");
   }
 
-  /**
-   * 전체 초기화 — 추가한 항목, 모든 완료 표시, 지난 기록을 모두 비우고
-   * 기본(코딩으로 만든) 항목만 남긴 '항목 추가 이전' 상태로 되돌린다.
-   */
-  function resetAll() {
-    data = createInitialData();
-    viewDate = today = todayKey();
-    editingId = null;
-    el.newItem.value = "";
-    syncCommitBtn();
-    saveData();
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    toast("장부를 새로 시작했습니다.", "기본 항목 " + SEED_ITEMS.length + "개만 남았습니다.");
+  function loadNoticeChecks() { return loadJson(NOTICE_CHECK_KEY, {}); }
+  function saveNoticeChecks(v) { saveJson(NOTICE_CHECK_KEY, v); }
+  function noticeKeyFor(dateKey, text) { return dateKey + "::" + text; }
+  function renderDailyNotice() {
+    var d = parseKey(viewDate);
+    var weekday = d.getDay();
+    var notices = WEEKLY_NOTICES[weekday] || [];
+    if (!notices.length) {
+      el.dailyNotice.hidden = true; el.dailyNoticeList.innerHTML = ""; return;
+    }
+    el.dailyNotice.hidden = false;
+    el.dailyNoticeDay.textContent = (d.getMonth() + 1) + "." + d.getDate() + " · " + WEEKDAY_KO[weekday] + "요일";
+
+    var checks = loadNoticeChecks();
+    var completed = 0;
+    el.dailyNoticeList.innerHTML = notices.map(function (text) {
+      var key = noticeKeyFor(viewDate, text);
+      var checked = !!checks[key];
+      if (checked) completed++;
+      return '<li class="' + (checked ? "done" : "") + '">' +
+        '<button type="button" class="notice-check" data-notice-key="' + escapeHtml(key) + '" aria-label="정기 업무 완료">' + (checked ? "✓" : "") + '</button>' +
+        '<span>' + escapeHtml(text) + '</span>' +
+        '</li>';
+    }).join("");
+    el.dailyNoticeSummary.textContent = completed + " / " + notices.length + " 완료";
+    el.dailyNotice.classList.toggle("all-done", completed === notices.length && notices.length > 0);
   }
 
-  function setFlash(id) {
-    flashId = id;
-    if (flashTimer) clearTimeout(flashTimer);
-    flashTimer = setTimeout(function () {
-      flashId = null;
-      var n = document.querySelector(".row.flash");
-      if (n) n.classList.remove("flash");
-    }, 450);
+  function loadMemos() { return loadJson(MEMO_KEY, {}); }
+  function renderMemo() {
+    var memos = loadMemos();
+    var text = typeof memos[viewDate] === "string" ? memos[viewDate] : "";
+    el.todayMemo.value = text;
+    el.todayMemo.readOnly = viewDate !== today;
+    el.memoClear.hidden = viewDate !== today || !text;
+    el.memoCount.textContent = text.length + " / 500";
+    el.memoSaveState.textContent = viewDate === today ? "자동 저장" : "지난 메모";
+  }
+  function saveMemo() {
+    if (viewDate !== today) return;
+    var memos = loadMemos();
+    memos[today] = el.todayMemo.value;
+    saveJson(MEMO_KEY, memos);
+    el.memoCount.textContent = el.todayMemo.value.length + " / 500";
+    el.memoSaveState.textContent = "저장됨";
+    setTimeout(function () { if (viewDate === today) el.memoSaveState.textContent = "자동 저장"; }, 700);
+    el.memoClear.hidden = !el.todayMemo.value;
   }
 
-  /* ============================================================
-     5. 렌더링
-     ============================================================ */
-  var ICONS = {
-    check:
-      '<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
-    up: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
-    down: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>',
-    pencil:
-      '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
-    trash:
-      '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>',
-    grip: '<svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>',
-  };
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-
-  /** 한 줄(li) 생성 */
   function buildRow(row, ordinal, readOnly) {
     var li = document.createElement("li");
-    li.className = "row" + (row.done ? " done" : "");
-
-    // 모바일에서 긴 문장은 길이에 따라 글씨를 자동으로 줄인다.
-    var textLength = String(row.text || "").replace(/\s/g, "").length;
-    if (textLength >= 65) li.classList.add("text-xlong");
-    else if (textLength >= 38) li.classList.add("text-long");
-    li.setAttribute("data-row-id", row.id);
-    li.style.animationDelay = Math.min(ordinal, 12) * 32 + "ms";
-    if (flashId === row.id) li.classList.add("flash");
-
+    li.className = "task-row" + (row.done ? " done" : "") + (row.pinned ? " pinned" : "");
+    li.dataset.rowId = row.id;
     var editable = !readOnly && !row.removed;
     if (editable) li.draggable = true;
 
-    var oi = indexOfItem(row.id);
-    var canUp = oi > 0;
-    var canDown = oi >= 0 && oi < data.items.length - 1;
+    var idx = indexOfItem(row.id);
+    var canUp = idx > 0, canDown = idx >= 0 && idx < data.items.length - 1;
 
-    var html = "";
-    html += '<span class="ordinal num-plate">' + String(ordinal).padStart(2, "0") + "</span>";
-    html +=
-      '<button type="button" class="seal-box" role="checkbox" aria-checked="' +
-      (row.done ? "true" : "false") +
-      '" data-act="toggle" aria-label="' +
-      escapeHtml(row.text) +
-      " " +
-      (row.done ? "완료 해제" : "완료 표시") +
-      '">' +
-      (row.done ? ICONS.check : "") +
-      "</button>";
+    var html = '<span class="task-index mono">' + String(ordinal).padStart(2, "0") + '</span>' +
+      '<button type="button" class="task-check" data-act="toggle" aria-label="완료 표시">' + (row.done ? "✓" : "") + '</button>' +
+      '<div class="task-text-wrap">';
 
     if (editingId === row.id) {
-      html +=
-        '<div class="row-text-wrap"><div class="row-edit">' +
-        '<input type="text" class="edit-input" maxlength="140" value="' +
-        escapeHtml(row.text) +
-        '" aria-label="항목 수정" />' +
-        "</div></div>";
+      html += '<input class="edit-input" type="text" maxlength="140" value="' + escapeHtml(row.text) + '">';
     } else {
-      html +=
-        '<div class="row-text-wrap">' +
-        '<button type="button" class="row-text" data-act="' +
-        (editable ? "edit" : "toggle") +
-        '" title="' +
-        (editable ? "클릭하여 수정" : escapeHtml(row.text)) +
-        '">' +
-        escapeHtml(row.text) +
-        '<span class="strike" aria-hidden="true"></span>' +
-        "</button>" +
-        "</div>";
+      html += '<button type="button" class="task-text" data-act="' + (editable ? "edit" : "toggle") + '">' +
+        escapeHtml(row.text) + '</button>';
     }
+    html += '</div>';
 
     if (editable && editingId !== row.id) {
-      html +=
-        '<div class="actions">' +
-        '<button type="button" class="act" data-act="up" aria-label="위로 이동"' +
-        (canUp ? "" : " disabled") +
-        ">" +
-        ICONS.up +
-        "</button>" +
-        '<button type="button" class="act" data-act="down" aria-label="아래로 이동"' +
-        (canDown ? "" : " disabled") +
-        ">" +
-        ICONS.down +
-        "</button>" +
-        '<button type="button" class="act" data-act="edit" aria-label="항목 수정">' +
-        ICONS.pencil +
-        "</button>" +
-        '<button type="button" class="act del" data-act="delete" aria-label="항목 삭제">' +
-        ICONS.trash +
-        "</button>" +
-        '<span class="grip" title="드래그하여 순서 변경" aria-hidden="true">' +
-        ICONS.grip +
-        "</span>" +
-        "</div>";
+      html += '<div class="task-actions">' +
+        '<button type="button" class="mini-btn pin-btn ' + (row.pinned ? "active" : "") + '" data-act="pin" title="상단 고정">📌</button>' +
+        '<button type="button" class="mini-btn" data-act="up" ' + (canUp ? "" : "disabled") + '>↑</button>' +
+        '<button type="button" class="mini-btn" data-act="down" ' + (canDown ? "" : "disabled") + '>↓</button>' +
+        '<button type="button" class="mini-btn" data-act="edit">✎</button>' +
+        '<button type="button" class="mini-btn danger" data-act="delete">×</button>' +
+        '<span class="grip" aria-hidden="true">⋮⋮</span>' +
+      '</div>';
     }
-
     li.innerHTML = html;
     return li;
   }
 
-  function loadManualNotices() {
-    try {
-      var raw = localStorage.getItem(MANUAL_NOTICE_KEY);
-      var parsed = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter(function (item) {
-        return item && typeof item.id === "string" && typeof item.text === "string";
-      });
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function saveManualNotices(items) {
-    try {
-      localStorage.setItem(MANUAL_NOTICE_KEY, JSON.stringify(items));
-    } catch (e) {
-      /* 저장 실패 시 화면 사용은 계속 허용 */
-    }
-  }
-
-  function renderManualNotices() {
-    if (!el.manualNoticeList || !el.manualNoticeCount || !el.manualNoticeEmpty) return;
-    var items = loadManualNotices();
-    el.manualNoticeCount.textContent = items.length + "건";
-    el.manualNoticeEmpty.hidden = items.length > 0;
-    el.manualNoticeList.innerHTML = items.map(function (item) {
-      return (
-        '<li data-manual-id="' + escapeHtml(item.id) + '">' +
-        '<span class="manual-notice__text">' + escapeHtml(item.text) + '</span>' +
-        '<button type="button" class="manual-notice__delete" data-manual-delete="' + escapeHtml(item.id) + '" aria-label="수동 공지 삭제">삭제</button>' +
-        '</li>'
-      );
-    }).join("");
-  }
-
-  function addManualNotice() {
-    if (!el.manualNoticeInput) return;
-    var text = String(el.manualNoticeInput.value || "").trim();
-    if (!text) {
-      el.manualNoticeInput.focus();
-      return;
-    }
-    var items = loadManualNotices();
-    items.push({ id: "notice-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7), text: text });
-    saveManualNotices(items);
-    el.manualNoticeInput.value = "";
-    renderManualNotices();
-    el.manualNoticeInput.focus();
-    toast("수동 공지를 추가했습니다.", text);
-  }
-
-  function deleteManualNotice(id) {
-    var items = loadManualNotices();
-    var removed = null;
-    items = items.filter(function (item) {
-      if (item.id === id) { removed = item; return false; }
-      return true;
+  function sortRows(rows) {
+    return rows.slice().sort(function (a, b) {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return indexOfItem(a.id) - indexOfItem(b.id);
     });
-    saveManualNotices(items);
-    renderManualNotices();
-    if (removed) toast("수동 공지를 삭제했습니다.", removed.text);
   }
 
-  function renderDailyNotice() {
-    if (!el.dailyNotice || !el.dailyNoticeList || !el.dailyNoticeDay) return;
-
-    var now = new Date();
-    var weekday = now.getDay();
-    var notices = WEEKLY_NOTICES[weekday] || [];
-
-    if (!notices.length) {
-      el.dailyNotice.hidden = true;
-      el.dailyNoticeList.innerHTML = "";
-      return;
-    }
-
-    el.dailyNotice.hidden = false;
-    el.dailyNoticeDay.textContent =
-      (now.getMonth() + 1) + "." + now.getDate() + " · " + WEEKDAY_KO[weekday] + "요일";
-    el.dailyNoticeList.innerHTML = notices.map(function (text) {
-      return "<li>" + escapeHtml(text) + "</li>";
-    }).join("");
+  function renderHistory() {
+    var past = pastKeys();
+    el.pastEmpty.hidden = past.length > 0;
+    el.pastList.innerHTML = "";
+    var recent = [];
+    past.slice(0, 7).forEach(function (k) {
+      var rows = rowsForDate(k);
+      var done = rows.filter(function (r) { return r.done; }).length;
+      var pct = percentOf(rows.length, done);
+      recent.push(pct);
+      var li = document.createElement("li");
+      li.innerHTML = '<button type="button" class="history-row ' + (k === viewDate ? "active" : "") + '" data-history-date="' + k + '">' +
+        '<span><strong>' + formatShortKo(k) + '</strong><small>' + WEEKDAY_KO[parseKey(k).getDay()] + '요일</small></span>' +
+        '<span class="history-bar"><i style="width:' + pct + '%"></i></span>' +
+        '<span class="mono">' + pct + '%</span>' +
+      '</button>';
+      el.pastList.appendChild(li);
+    });
+    var avg = recent.length ? Math.round(recent.reduce(function (a, b) { return a + b; }, 0) / recent.length) : 0;
+    el.weekAverage.textContent = "7일 평균 " + avg + "%";
   }
 
   function render() {
     renderDailyNotice();
     renderManualNotices();
+    renderMemo();
+    renderHistory();
+
     var isToday = viewDate === today;
     var rows = rowsForDate(viewDate);
-    var pending = rows.filter(function (r) {
-      return !r.done;
-    });
-    var finished = rows.filter(function (r) {
-      return r.done;
-    });
-    var pct = percentOf(rows.length, finished.length);
-    var complete = rows.length > 0 && finished.length === rows.length;
+    var q = searchQuery.trim().toLowerCase();
+    if (q) rows = rows.filter(function (r) { return r.text.toLowerCase().indexOf(q) !== -1; });
 
-    /* --- 머리글 --- */
+    var pending = sortRows(rows.filter(function (r) { return !r.done; }));
+    var finished = sortRows(rows.filter(function (r) { return r.done; }));
+
+    var fullRows = rowsForDate(viewDate);
+    var fullDone = fullRows.filter(function (r) { return r.done; }).length;
+    var pct = percentOf(fullRows.length, fullDone);
+    var remain = Math.max(0, fullRows.length - fullDone);
+
     el.serial.textContent = "NO. " + String(data.items.length).padStart(3, "0");
-
-    /* --- 날짜 --- */
-    var rel = relativeLabel(viewDate);
-    el.dateMeta.innerHTML =
-      (rel ? rel + " · " : "") + '<span class="num-plate">' + viewDate.replace(/-/g, ".") + "</span>";
+    el.dateMeta.textContent = (viewDate === today ? "오늘 · " : "") + viewDate.replace(/-/g, ".");
     var lk = formatLongKo(viewDate);
     el.dateHead.querySelector(".line1").textContent = lk.md;
     el.dateHead.querySelector(".line2").textContent = lk.wd;
@@ -701,404 +467,248 @@
     el.todayBtn.hidden = isToday;
     el.nextDay.disabled = viewDate >= today;
 
-    /* --- 진행률 --- */
-    el.pctNum.textContent = String(pct);
-    el.pctNum.parentNode.classList.toggle("complete", complete);
-    el.fill.style.transform = "scaleX(" + pct / 100 + ")";
-    el.fill.classList.toggle("complete", complete);
-    el.track.setAttribute("aria-valuenow", String(pct));
-    el.tally.textContent = finished.length + " / " + rows.length + " 완료";
-    el.doneFlag.hidden = !complete;
+    el.pctNum.textContent = pct;
+    el.progressRing.style.setProperty("--pct", pct);
+    el.fill.style.width = pct + "%";
+    el.track.setAttribute("aria-valuenow", pct);
+    el.statTotal.textContent = fullRows.length;
+    el.statDone.textContent = fullDone;
+    el.statRemain.textContent = remain;
+    el.doneFlag.hidden = !(fullRows.length > 0 && remain === 0);
 
-    /* --- 지난 기록 --- */
-    var past = pastKeys();
-    el.pastEmpty.hidden = past.length > 0;
-    el.pastList.innerHTML = "";
-    past.slice(0, 8).forEach(function (k) {
-      var r = rowsForDate(k);
-      var d = r.filter(function (x) {
-        return x.done;
-      }).length;
-      var p = percentOf(r.length, d);
-      var li = document.createElement("li");
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "past-row" + (k === viewDate ? " active" : "");
-      btn.innerHTML =
-        '<span class="pd num-plate">' +
-        formatShortKo(k) +
-        "</span>" +
-        '<span class="pbar"><i class="' +
-        (p === 100 ? "full" : "") +
-        '" style="transform:scaleX(' +
-        p / 100 +
-        ')"></i></span>' +
-        '<span class="pp num-plate">' +
-        p +
-        "%</span>";
-      btn.addEventListener("click", function () {
-        viewDate = k;
-        editingId = null;
-        render();
-      });
-      li.appendChild(btn);
-      el.pastList.appendChild(li);
-    });
-
-    /* --- 기입란 머리글 --- */
-    el.captionKicker.textContent = isToday ? "오늘의 기입란" : "지난 장부";
-    el.captionHead.textContent =
-      rows.length === 0
-        ? "기입란이 비어 있습니다"
-        : complete
-          ? "오늘 몫을 모두 적었습니다"
-          : "남은 항목 " + pending.length + "개";
-    el.captionDate.textContent = viewDate.replace(/-/g, ".");
+    el.captionHead.textContent = fullRows.length ? "남은 항목 " + remain + "개" : "업무가 없습니다";
+    el.captionKicker.textContent = isToday ? "오늘의 업무를 순서대로 처리하세요." : "지난 기록은 완료 표시만 변경할 수 있습니다.";
     el.composeRow.hidden = !isToday;
 
-    /* --- 목록 --- */
+    el.pendingCount.textContent = pending.length + "건";
     el.pendingList.innerHTML = "";
-    pending.forEach(function (r, i) {
-      el.pendingList.appendChild(buildRow(r, i + 1, !isToday || r.removed));
-    });
+    pending.forEach(function (r, i) { el.pendingList.appendChild(buildRow(r, i + 1, !isToday || r.removed)); });
 
-    el.emptyState.hidden = rows.length !== 0;
-
-    el.settledBar.hidden = finished.length === 0;
     el.settledCount.textContent = finished.length + "건";
+    el.settledBar.hidden = finished.length === 0;
+    el.doneList.hidden = doneCollapsed;
     el.doneList.innerHTML = "";
-    finished.forEach(function (r, i) {
-      el.doneList.appendChild(buildRow(r, pending.length + i + 1, !isToday || r.removed));
-    });
+    finished.forEach(function (r, i) { el.doneList.appendChild(buildRow(r, pending.length + i + 1, !isToday || r.removed)); });
+    el.toggleDone.textContent = doneCollapsed ? "완료 펼치기" : "완료 접기";
+    el.doneToggleButton.classList.toggle("open", !doneCollapsed);
 
-    /* --- 합계선 --- */
-    el.footTally.textContent =
-      "항목 " + rows.length + " · 완료 " + finished.length + " · 남음 " + pending.length;
+    el.emptyState.hidden = (pending.length + finished.length) > 0;
+    el.footTally.textContent = "항목 " + fullRows.length + " · 완료 " + fullDone + " · 남음 " + remain;
 
-    /* --- 편집 중이면 입력란에 포커스 --- */
     if (editingId) {
       var input = document.querySelector('[data-row-id="' + editingId + '"] .edit-input');
-      if (input) {
-        input.focus();
-        input.select();
-      }
+      if (input) { input.focus(); input.select(); }
     }
   }
 
-  /* ============================================================
-     6. 이벤트
-     ============================================================ */
-
-  /** 목록 클릭 처리 (이벤트 위임) */
-  function onListClick(e) {
-    var actEl = e.target.closest("[data-act]");
-    if (!actEl) return;
-    var li = e.target.closest("[data-row-id]");
-    if (!li) return;
-    var id = li.getAttribute("data-row-id");
-    var act = actEl.getAttribute("data-act");
-
-    if (act === "toggle") toggleItem(id, viewDate);
-    else if (act === "edit") {
-      editingId = id;
-      render();
-    } else if (act === "delete") removeItem(id);
-    else if (act === "up") moveItem(id, -1);
-    else if (act === "down") moveItem(id, 1);
-  }
-
-  /** 인라인 편집 확정/취소 */
-  function onListKeydown(e) {
-    if (!e.target.classList.contains("edit-input")) return;
-    var li = e.target.closest("[data-row-id]");
-    if (!li) return;
-    var id = li.getAttribute("data-row-id");
-
-    if (e.key === "Enter") {
-      e.preventDefault();
-      editItem(id, e.target.value);
-      editingId = null;
-      render();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      editingId = null;
-      render();
-    }
-  }
-
-  function onListBlur(e) {
-    if (!e.target.classList.contains("edit-input")) return;
-    var li = e.target.closest("[data-row-id]");
-    if (!li) return;
-    editItem(li.getAttribute("data-row-id"), e.target.value);
-    editingId = null;
-    render();
-  }
-
-  /** 드래그 앤 드롭 */
-  function bindDnd(container) {
-    container.addEventListener("dragstart", function (e) {
-      var li = e.target.closest("[data-row-id]");
-      if (!li || !li.draggable) return;
-      dragId = li.getAttribute("data-row-id");
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", dragId);
-      li.classList.add("dragging");
-    });
-
-    container.addEventListener("dragover", function (e) {
-      e.preventDefault();
-      var li = e.target.closest("[data-row-id]");
-      if (!li) return;
-      var id = li.getAttribute("data-row-id");
-      if (id === overId) return;
-      overId = id;
-      document.querySelectorAll(".row.drag-over").forEach(function (n) {
-        n.classList.remove("drag-over");
-      });
-      if (id !== dragId) li.classList.add("drag-over");
-    });
-
-    container.addEventListener("drop", function (e) {
-      e.preventDefault();
-      finishDrag();
-    });
-
-    container.addEventListener("dragend", function () {
-      finishDrag();
-    });
-  }
-
-  function finishDrag() {
-    if (dragId && overId && dragId !== overId) reorder(dragId, overId);
-    dragId = null;
-    overId = null;
-    document.querySelectorAll(".row.dragging, .row.drag-over").forEach(function (n) {
-      n.classList.remove("dragging", "drag-over");
-    });
-  }
-
-  function syncCommitBtn() {
-    el.addBtn.classList.toggle("ready", el.newItem.value.trim().length > 0);
-  }
-
-  /* ---------------- 토스트 ---------------- */
   function toast(title, desc, actionLabel, onAction) {
     var box = document.createElement("div");
     box.className = "toast";
-    var body = document.createElement("div");
-    body.className = "t-body";
-    var t = document.createElement("div");
-    t.textContent = title;
-    body.appendChild(t);
-    if (desc) {
-      var d = document.createElement("div");
-      d.className = "t-desc";
-      d.textContent = desc;
-      body.appendChild(d);
-    }
-    box.appendChild(body);
-
+    box.innerHTML = '<div><strong>' + escapeHtml(title) + '</strong>' + (desc ? '<span>' + escapeHtml(desc) + '</span>' : '') + '</div>';
     if (actionLabel && onAction) {
-      var a = document.createElement("button");
-      a.type = "button";
-      a.className = "t-act";
-      a.textContent = actionLabel;
-      a.addEventListener("click", function () {
-        onAction();
-        dismiss();
-      });
-      box.appendChild(a);
+      var btn = document.createElement("button");
+      btn.textContent = actionLabel;
+      btn.onclick = function () { onAction(); box.remove(); };
+      box.appendChild(btn);
     }
-
     el.toastWrap.appendChild(box);
-    var timer = setTimeout(dismiss, actionLabel ? 6000 : 3200);
-
-    function dismiss() {
-      clearTimeout(timer);
-      if (!box.parentNode) return;
-      box.classList.add("leaving");
-      setTimeout(function () {
-        if (box.parentNode) box.parentNode.removeChild(box);
-      }, 200);
-    }
+    setTimeout(function () { if (box.parentNode) box.remove(); }, actionLabel ? 6000 : 3200);
   }
 
-  /* ---------------- 테마 ---------------- */
   function applyTheme(mode) {
     document.documentElement.setAttribute("data-theme", mode);
-    try {
-      localStorage.setItem(THEME_KEY, mode);
-    } catch (e) {
-      /* 무시 */
-    }
+    try { localStorage.setItem(THEME_KEY, mode); } catch (e) {}
   }
 
-  /* ============================================================
-     7. 날짜 넘어감 감시
-     자정을 지나면 today 가 바뀌고, 그 날짜의 완료 목록은 비어 있으므로
-     '완료 표시만 초기화'가 자동으로 이루어진다. 항목은 건드리지 않는다.
-     ============================================================ */
   function checkRollover() {
     var t = todayKey();
     if (t === today) return;
     var wasToday = viewDate === today;
-    today = t;
-    data.lastSeenDate = t;
-    if (wasToday) viewDate = t; // 오늘을 보고 있었다면 새 장으로 따라간다
-    saveData();
-    render();
+    today = t; data.lastSeenDate = t;
+    if (wasToday) viewDate = t;
+    saveData(); render();
   }
 
-  /* ============================================================
-     8. 초기화
-     ============================================================ */
-  function init() {
-    // 테마
-    var savedTheme = null;
-    try {
-      savedTheme = localStorage.getItem(THEME_KEY);
-    } catch (e) {
-      /* 무시 */
-    }
-    applyTheme(savedTheme === "dark" ? "dark" : "light");
+  function bindList(container) {
+    container.addEventListener("click", function (e) {
+      var actEl = e.target.closest("[data-act]");
+      if (!actEl) return;
+      var row = e.target.closest("[data-row-id]");
+      if (!row) return;
+      var id = row.dataset.rowId;
+      var act = actEl.dataset.act;
+      if (act === "toggle") toggleItem(id, viewDate);
+      if (act === "edit") { editingId = id; render(); }
+      if (act === "delete") removeItem(id);
+      if (act === "up") moveItem(id, -1);
+      if (act === "down") moveItem(id, 1);
+      if (act === "pin") togglePin(id);
+    });
 
-    // 데이터
+    container.addEventListener("keydown", function (e) {
+      if (!e.target.classList.contains("edit-input")) return;
+      var row = e.target.closest("[data-row-id]");
+      if (!row) return;
+      if (e.key === "Enter") {
+        e.preventDefault(); editItem(row.dataset.rowId, e.target.value); editingId = null; render();
+      } else if (e.key === "Escape") {
+        e.preventDefault(); editingId = null; render();
+      }
+    });
+
+    container.addEventListener("blur", function (e) {
+      if (!e.target.classList.contains("edit-input")) return;
+      var row = e.target.closest("[data-row-id]");
+      if (!row) return;
+      editItem(row.dataset.rowId, e.target.value); editingId = null; render();
+    }, true);
+
+    container.addEventListener("dragstart", function (e) {
+      var row = e.target.closest("[data-row-id]");
+      if (!row || !row.draggable) return;
+      dragId = row.dataset.rowId; row.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    container.addEventListener("dragover", function (e) {
+      e.preventDefault();
+      var row = e.target.closest("[data-row-id]");
+      if (!row) return;
+      overId = row.dataset.rowId;
+      document.querySelectorAll(".task-row.drag-over").forEach(function (n) { n.classList.remove("drag-over"); });
+      if (overId !== dragId) row.classList.add("drag-over");
+    });
+    container.addEventListener("drop", finishDrag);
+    container.addEventListener("dragend", finishDrag);
+  }
+
+  function finishDrag(e) {
+    if (e) e.preventDefault();
+    if (dragId && overId && dragId !== overId) reorder(dragId, overId);
+    dragId = overId = null;
+    document.querySelectorAll(".task-row.dragging,.task-row.drag-over").forEach(function (n) {
+      n.classList.remove("dragging", "drag-over");
+    });
+  }
+
+  function resetAll() {
+    data = createInitialData();
+    today = viewDate = todayKey();
+    saveData();
+    saveJson(MEMO_KEY, {});
+    saveJson(NOTICE_CHECK_KEY, {});
+    saveJson(MANUAL_NOTICE_KEY, []);
+    el.overlay.hidden = true;
+    render();
+    toast("전체 초기화했습니다.", "기본 업무만 다시 생성했습니다.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function init() {
+    var savedTheme = null;
+    try { savedTheme = localStorage.getItem(THEME_KEY); } catch (e) {}
+    applyTheme(savedTheme === "light" ? "light" : "dark");
+
     data = loadData();
     today = todayKey();
     viewDate = today;
     data.lastSeenDate = today;
-    el.seedCount.textContent = String(SEED_ITEMS.length);
+    el.seedCount.textContent = SEED_ITEMS.length;
     saveData();
 
-    // 이벤트 바인딩
     el.themeToggle.addEventListener("click", function () {
       applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
     });
 
-    el.prevDay.addEventListener("click", function () {
-      viewDate = shiftKey(viewDate, -1);
-      editingId = null;
-      render();
+    el.focusToggle.addEventListener("click", function () {
+      focusMode = !focusMode;
+      document.body.classList.toggle("focus-mode", focusMode);
+      el.focusToggle.classList.toggle("active", focusMode);
+      if (focusMode) document.getElementById("checklistCard").scrollIntoView({ behavior: "smooth", block: "start" });
     });
 
-    el.nextDay.addEventListener("click", function () {
-      if (viewDate >= today) return;
-      viewDate = shiftKey(viewDate, 1);
-      editingId = null;
-      render();
-    });
-
-    el.todayBtn.addEventListener("click", function () {
-      viewDate = today;
-      editingId = null;
-      render();
-    });
-
-    if (el.manualNoticeAdd && el.manualNoticeInput && el.manualNoticeList) {
-      el.manualNoticeAdd.addEventListener("click", addManualNotice);
-      el.manualNoticeInput.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          addManualNotice();
-        }
-      });
-      el.manualNoticeList.addEventListener("click", function (e) {
-        var btn = e.target.closest("[data-manual-delete]");
-        if (!btn) return;
-        deleteManualNotice(btn.getAttribute("data-manual-delete"));
-      });
-    }
+    el.prevDay.addEventListener("click", function () { viewDate = shiftKey(viewDate, -1); editingId = null; render(); });
+    el.nextDay.addEventListener("click", function () { if (viewDate < today) { viewDate = shiftKey(viewDate, 1); editingId = null; render(); } });
+    el.todayBtn.addEventListener("click", function () { viewDate = today; editingId = null; render(); });
 
     el.addBtn.addEventListener("click", function () {
-      var v = el.newItem.value;
-      if (!v.trim()) {
-        el.newItem.focus();
-        return;
-      }
-      addItem(v);
-      el.newItem.value = "";
-      syncCommitBtn();
-      el.newItem.focus();
+      addItem(el.newItem.value); el.newItem.value = ""; el.newItem.focus();
+    });
+    el.newItem.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); el.addBtn.click(); } });
+
+    el.manualNoticeAdd.addEventListener("click", addManualNotice);
+    el.manualNoticeInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addManualNotice(); } });
+    el.manualNoticeList.addEventListener("click", function (e) {
+      var t = e.target.closest("[data-manual-toggle]");
+      if (t) toggleManualNotice(t.dataset.manualToggle);
+      var d = e.target.closest("[data-manual-delete]");
+      if (d) deleteManualNotice(d.dataset.manualDelete);
     });
 
-    el.newItem.addEventListener("input", syncCommitBtn);
-    el.newItem.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        el.addBtn.click();
-      }
+    el.dailyNoticeList.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-notice-key]");
+      if (!btn) return;
+      var checks = loadNoticeChecks();
+      checks[btn.dataset.noticeKey] = !checks[btn.dataset.noticeKey];
+      saveNoticeChecks(checks); renderDailyNotice();
+    });
+    el.dailyNoticeReset.addEventListener("click", function () {
+      var checks = loadNoticeChecks();
+      Object.keys(checks).forEach(function (k) { if (k.indexOf(viewDate + "::") === 0) delete checks[k]; });
+      saveNoticeChecks(checks); renderDailyNotice();
     });
 
-    [el.pendingList, el.doneList].forEach(function (c) {
-      c.addEventListener("click", onListClick);
-      c.addEventListener("keydown", onListKeydown);
-      c.addEventListener("blur", onListBlur, true);
-      bindDnd(c);
+    el.todayMemo.addEventListener("input", saveMemo);
+    el.memoClear.addEventListener("click", function () { if (viewDate === today) { el.todayMemo.value = ""; saveMemo(); } });
+
+    el.toggleDone.addEventListener("click", function () { doneCollapsed = !doneCollapsed; render(); });
+    el.doneToggleButton.addEventListener("click", function () { doneCollapsed = !doneCollapsed; render(); });
+
+    el.searchToggle.addEventListener("click", function () {
+      el.searchWrap.hidden = !el.searchWrap.hidden;
+      if (!el.searchWrap.hidden) el.searchInput.focus();
+      else { searchQuery = ""; el.searchInput.value = ""; render(); }
+    });
+    el.searchInput.addEventListener("input", function () { searchQuery = el.searchInput.value; render(); });
+    el.searchClear.addEventListener("click", function () { searchQuery = ""; el.searchInput.value = ""; render(); });
+
+    el.pastList.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-history-date]");
+      if (!btn) return;
+      viewDate = btn.dataset.historyDate; editingId = null; render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
     });
 
-    el.clearChecks.addEventListener("click", clearTodayChecks);
+    bindList(el.pendingList); bindList(el.doneList);
 
-    el.resetAll.addEventListener("click", function () {
-      el.overlay.hidden = false;
-      el.dlgCancel.focus();
+    el.clearChecks.addEventListener("click", function () {
+      data.history[today] = []; saveData(); render(); toast("오늘 완료 표시를 지웠습니다.");
     });
+    el.resetAll.addEventListener("click", function () { el.overlay.hidden = false; el.dlgCancel.focus(); });
+    el.dlgCancel.addEventListener("click", function () { el.overlay.hidden = true; });
+    el.dlgConfirm.addEventListener("click", resetAll);
+    el.overlay.addEventListener("click", function (e) { if (e.target === el.overlay) el.overlay.hidden = true; });
 
-    el.dlgCancel.addEventListener("click", function () {
-      el.overlay.hidden = true;
-    });
-
-    el.dlgConfirm.addEventListener("click", function () {
-      el.overlay.hidden = true;
-      resetAll();
-    });
-
-    el.overlay.addEventListener("click", function (e) {
-      if (e.target === el.overlay) el.overlay.hidden = true;
+    el.quickAddFab.addEventListener("click", function () {
+      document.getElementById("manualNotice").scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(function () { el.manualNoticeInput.focus(); }, 350);
     });
 
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !el.overlay.hidden) {
-        el.overlay.hidden = true;
-        return;
-      }
+      if (e.key === "Escape" && !el.overlay.hidden) { el.overlay.hidden = true; return; }
       var tag = e.target && e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (e.key === "n" || e.key === "N") {
-        e.preventDefault();
-        el.newItem.focus();
-      }
+      if (e.key === "n" || e.key === "N") { e.preventDefault(); el.newItem.focus(); }
     });
 
-    // 날짜 넘어감 감시
     setInterval(checkRollover, 30000);
     window.addEventListener("focus", checkRollover);
-    document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") checkRollover();
-    });
+    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") checkRollover(); });
 
-    // 다른 탭에서 변경된 내용 동기화
-    window.addEventListener("storage", function (e) {
-      if (e.key === MANUAL_NOTICE_KEY) {
-        renderManualNotices();
-        return;
-      }
-      if (e.key !== STORAGE_KEY || !e.newValue) return;
-      try {
-        data = normalize(JSON.parse(e.newValue));
-        render();
-      } catch (err) {
-        /* 무시 */
-      }
-    });
+    window.addEventListener("storage", function () { data = loadData(); render(); });
 
-    syncCommitBtn();
     render();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
 })();
