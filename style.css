@@ -471,3 +471,424 @@ html[data-theme="light"] .history-row.active>.mono{color:#163e6b}
     border-color:rgba(184,47,71,.18);
   }
 }
+
+
+/* ============================================================
+   v3 — LIGHT MODE 전용 디자인
+   다크 모드는 기존 네이비 디자인 그대로 유지하고,
+   라이트 모드에서만 구조적 인상까지 다르게 보이도록 오버라이드.
+   ============================================================ */
+
+html[data-theme="light"]{
+  --bg:#eef3f8;
+  --bg-2:#e7edf4;
+  --card:#ffffff;
+  --card-2:#f7f9fc;
+  --card-3:#eef3f8;
+  --line:rgba(20,50,84,.12);
+  --line-strong:rgba(20,50,84,.22);
+  --text:#10233b;
+  --muted:#647890;
+  --muted-2:#8798aa;
+  --blue:#2f80ed;
+  --blue-2:#1f68c8;
+  --cyan:#10a3a3;
+  --danger:#ff5c78;
+  --danger-2:#d73c58;
+  --danger-bg:#fff0f3;
+  --green:#2f9b6f;
+  --shadow:0 12px 30px rgba(33,64,97,.10);
+}
+
+/* 전체 배경 */
+html[data-theme="light"] body{
+  background:#eef3f8;
+}
+
+html[data-theme="light"] .app-bg{
+  background:
+    radial-gradient(850px 480px at -10% -5%, rgba(47,128,237,.10), transparent 60%),
+    radial-gradient(780px 520px at 110% 5%, rgba(16,163,163,.06), transparent 65%),
+    linear-gradient(180deg,#eef3f8 0%,#e7edf4 100%);
+}
+
+/* 상단 바 */
+html[data-theme="light"] .topbar{
+  background:rgba(255,255,255,.95);
+  border:1px solid rgba(20,50,84,.10);
+  box-shadow:0 8px 24px rgba(28,61,96,.10);
+}
+
+html[data-theme="light"] .brand-mark{
+  background:linear-gradient(145deg,#4d9bff,#2c74df);
+  box-shadow:0 8px 18px rgba(47,128,237,.22);
+}
+
+html[data-theme="light"] .brand-name{
+  color:#10233b;
+}
+
+html[data-theme="light"] .brand-sub{
+  color:#6f8094;
+}
+
+html[data-theme="light"] .icon-btn{
+  background:#ffffff;
+  border-color:rgba(20,50,84,.12);
+  color:#536981;
+}
+
+html[data-theme="light"] .icon-btn:hover,
+html[data-theme="light"] .icon-btn.active{
+  background:#f2f6fb;
+  border-color:rgba(47,128,237,.30);
+  color:#1f68c8;
+}
+
+/* 공통 카드 */
+html[data-theme="light"] .card,
+html[data-theme="light"] .notice-card{
+  background:#ffffff;
+  border:1px solid rgba(20,50,84,.10);
+  box-shadow:0 10px 26px rgba(32,66,101,.08);
+}
+
+/* TODAY NOTICE — 밝은 모드 전용 */
+html[data-theme="light"] .priority-card{
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.98),rgba(255,255,255,.98));
+  border-color:rgba(255,92,120,.20);
+  box-shadow:0 12px 28px rgba(74,40,53,.08);
+}
+
+html[data-theme="light"] .priority-card::before{
+  width:4px;
+  background:linear-gradient(180deg,#ff5c78,#ff7f95);
+}
+
+html[data-theme="light"] .priority-glow{
+  display:none;
+}
+
+html[data-theme="light"] .priority-title{
+  color:#10233b;
+}
+
+html[data-theme="light"] .danger-text{
+  color:#ff5c78;
+}
+
+html[data-theme="light"] .danger-chip{
+  background:#fff0f3;
+  border-color:rgba(255,92,120,.16);
+  color:#e94865;
+}
+
+html[data-theme="light"] .notice-progress-row{
+  color:#7a8796;
+}
+
+html[data-theme="light"] .priority-list li{
+  background:#ffffff;
+  border-color:rgba(20,50,84,.10);
+  color:#18304f;
+  box-shadow:0 2px 8px rgba(32,66,101,.03);
+}
+
+html[data-theme="light"] .notice-check{
+  background:#fff;
+  border-color:rgba(20,50,84,.20);
+}
+
+html[data-theme="light"] .priority-list li.done{
+  opacity:.7;
+}
+
+html[data-theme="light"] .priority-list li.done .notice-check{
+  background:#ff5c78;
+  border-color:#ff5c78;
+  color:#fff;
+}
+
+html[data-theme="light"] .priority-card.all-done{
+  background:#f7fffd;
+  border-color:rgba(16,163,163,.20);
+}
+
+html[data-theme="light"] .priority-card.all-done::before{
+  background:#10a3a3;
+}
+
+/* TODAY 카드 */
+html[data-theme="light"] .today-card{
+  background:#ffffff;
+}
+
+html[data-theme="light"] .today-title{
+  color:#10233b;
+}
+
+html[data-theme="light"] .today-title .line2{
+  color:#2f80ed;
+}
+
+html[data-theme="light"] .date-meta{
+  color:#6f8094;
+}
+
+html[data-theme="light"] .readonly-badge{
+  background:#fff5e8;
+  color:#b7721e;
+}
+
+html[data-theme="light"] .progress-ring{
+  background:conic-gradient(#2f80ed calc(var(--pct)*1%),#edf1f6 0);
+}
+
+html[data-theme="light"] .progress-ring::after{
+  background:#ffffff;
+}
+
+html[data-theme="light"] .progress-bar{
+  background:#edf1f6;
+}
+
+html[data-theme="light"] .progress-bar i{
+  background:linear-gradient(90deg,#2f80ed,#65a7ff);
+}
+
+html[data-theme="light"] .stat-row>div{
+  background:#f8fafc;
+  border-color:rgba(20,50,84,.10);
+}
+
+html[data-theme="light"] .stat-label{
+  color:#718297;
+}
+
+html[data-theme="light"] .done-message{
+  background:#effaf5;
+  color:#2f9b6f;
+}
+
+/* 메모 */
+html[data-theme="light"] .eyebrow.accent{
+  color:#10a3a3;
+}
+
+html[data-theme="light"] .memo-card textarea{
+  background:#fbfcfe;
+  border-color:rgba(20,50,84,.11);
+  color:#18304f;
+}
+
+html[data-theme="light"] .memo-card textarea:focus{
+  border-color:rgba(16,163,163,.35);
+  box-shadow:0 0 0 3px rgba(16,163,163,.07);
+}
+
+html[data-theme="light"] .memo-card textarea::placeholder{
+  color:#8d9cad;
+}
+
+/* 추가 업무 */
+html[data-theme="light"] .quick-composer input,
+html[data-theme="light"] .compose-row input,
+html[data-theme="light"] .search-wrap input,
+html[data-theme="light"] .edit-input{
+  background:#fbfcfe;
+  border-color:rgba(20,50,84,.11);
+  color:#18304f;
+}
+
+html[data-theme="light"] .quick-composer input::placeholder,
+html[data-theme="light"] .compose-row input::placeholder,
+html[data-theme="light"] .search-wrap input::placeholder{
+  color:#8d9cad;
+}
+
+html[data-theme="light"] .primary-btn,
+html[data-theme="light"] .fab{
+  background:linear-gradient(145deg,#4d9bff,#2f80ed);
+  box-shadow:0 8px 18px rgba(47,128,237,.20);
+}
+
+html[data-theme="light"] .quick-list li{
+  background:#f8fafc;
+  border-color:rgba(20,50,84,.10);
+}
+
+html[data-theme="light"] .quick-list li.done .quick-check{
+  background:#10a3a3;
+  border-color:#10a3a3;
+  color:#fff;
+}
+
+html[data-theme="light"] .quick-check{
+  background:#fff;
+  border-color:rgba(20,50,84,.20);
+}
+
+/* 체크리스트 카드 */
+html[data-theme="light"] .checklist-card{
+  background:#ffffff;
+}
+
+html[data-theme="light"] .tool-btn{
+  background:#f7f9fc;
+  border-color:rgba(20,50,84,.10);
+  color:#435b75;
+}
+
+html[data-theme="light"] .tool-btn:hover{
+  background:#eef4fb;
+  color:#1f68c8;
+}
+
+html[data-theme="light"] .list-caption,
+html[data-theme="light"] .done-toggle{
+  background:#f8fafc;
+  color:#66798f;
+}
+
+html[data-theme="light"] .task-row{
+  border-top-color:rgba(20,50,84,.09);
+}
+
+html[data-theme="light"] .task-row:hover{
+  background:#f7faff;
+}
+
+html[data-theme="light"] .task-row.pinned{
+  background:linear-gradient(90deg,rgba(47,128,237,.06),transparent 74%);
+}
+
+html[data-theme="light"] .task-index{
+  color:#8ea0b3;
+}
+
+html[data-theme="light"] .task-check{
+  background:#ffffff;
+  border-color:rgba(20,50,84,.20);
+  color:#fff;
+}
+
+html[data-theme="light"] .task-row.done .task-check{
+  background:#2f80ed;
+  border-color:#2f80ed;
+}
+
+html[data-theme="light"] .task-text{
+  color:#18304f;
+}
+
+html[data-theme="light"] .task-row.done .task-text{
+  color:#8c9aaa;
+}
+
+html[data-theme="light"] .mini-btn{
+  background:#ffffff;
+  border:1px solid rgba(20,50,84,.13);
+  color:#284967;
+  box-shadow:0 1px 3px rgba(20,50,84,.04);
+}
+
+html[data-theme="light"] .mini-btn:hover,
+html[data-theme="light"] .mini-btn:active{
+  background:#eef5fd;
+  color:#1f68c8;
+  border-color:rgba(47,128,237,.24);
+}
+
+html[data-theme="light"] .mini-btn.danger{
+  color:#d84a63;
+}
+
+html[data-theme="light"] .mini-btn.danger:hover{
+  background:#fff0f3;
+  color:#d84a63;
+  border-color:rgba(216,74,99,.20);
+}
+
+/* 기록/관리 */
+html[data-theme="light"] .chip,
+html[data-theme="light"] .chip-btn{
+  background:#f7f9fc;
+  border-color:rgba(20,50,84,.10);
+  color:#5d7188;
+}
+
+html[data-theme="light"] .history-row{
+  border-top-color:rgba(20,50,84,.09);
+}
+
+html[data-theme="light"] .history-bar{
+  background:#edf1f6;
+}
+
+html[data-theme="light"] .history-bar i{
+  background:#2f80ed;
+}
+
+html[data-theme="light"] .history-row.active strong,
+html[data-theme="light"] .history-row.active>.mono{
+  color:#2f80ed;
+}
+
+html[data-theme="light"] .manage-btn{
+  background:#fbfcfe;
+  border-color:rgba(20,50,84,.11);
+  color:#274763;
+}
+
+html[data-theme="light"] .manage-btn.danger{
+  background:#fff2f4;
+  border-color:rgba(255,92,120,.18);
+  color:#d94a64;
+}
+
+/* 하단 */
+html[data-theme="light"] .tips-grid p{
+  color:#687b91;
+}
+
+html[data-theme="light"] .tips-grid strong{
+  color:#2f80ed;
+}
+
+html[data-theme="light"] .app-footer{
+  color:#7c8da0;
+}
+
+/* 모바일 라이트 모드: 액션 버튼을 큼직하게 */
+@media (max-width:639px){
+  html[data-theme="light"] .task-actions{
+    width:82px;
+    gap:5px;
+  }
+
+  html[data-theme="light"] .mini-btn{
+    width:36px;
+    height:36px;
+    border-radius:11px;
+    font-size:.92rem;
+  }
+
+  html[data-theme="light"] .task-row{
+    min-height:68px;
+  }
+
+  html[data-theme="light"] .task-text{
+    font-size:.86rem;
+    line-height:1.52;
+  }
+
+  html[data-theme="light"] .task-check{
+    width:31px;
+    height:31px;
+  }
+
+  html[data-theme="light"] .checklist-head{
+    padding-bottom:14px;
+  }
+}
